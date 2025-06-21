@@ -5,10 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Land Measurement Tool</title>
 
-  <!-- Mapbox CSS -->
-  <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet" />
+  <!-- MapLibre GL JS CSS -->
+  <link href="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.css" rel="stylesheet" />
 
   <style>
+    /* [UNCHANGED STYLES FROM YOUR VERSION] */
     * {
       margin: 0;
       padding: 0;
@@ -110,7 +111,6 @@
       <button class="control-btn" style="background-color:#999;" onclick="stopMeasurement()">
         <span>Stop</span>
       </button>
-
       <button class="control-btn find" onclick="findLocation()">
         <span>Find Location</span>
       </button>
@@ -123,49 +123,70 @@
     </div>
   </div>
 
-  <!-- Mapbox JS -->
-  <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+  <!-- MapLibre JS -->
+  <script src="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+
   <script>
-    mapboxgl.accessToken = 'pk.eyJ1IjoibWFkdXNhbmthMDk4IiwiYSI6ImNtYzVkOTZlcDBlZHcybHNhbjJqYmp0d24ifQ.HyhVu4NIaB6ZOsOEAEWG9A';
-  
-    const map = new mapboxgl.Map({
+    const map = new maplibregl.Map({
       container: 'map',
-      style: 'mapbox://styles/mapbox/satellite-streets-v12',
+      style: {
+        version: 8,
+        sources: {
+          esri: {
+            type: 'raster',
+            tiles: [
+              'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+            ],
+            tileSize: 256,
+            attribution: '© Esri'
+          }
+        },
+        layers: [
+          {
+            id: 'esri-tiles',
+            type: 'raster',
+            source: 'esri',
+            minzoom: 0,
+            maxzoom: 22
+          }
+        ]
+      },
       center: [80.7718, 7.8731],
-      zoom: 17,
+      zoom: 17
     });
-  
-    map.addControl(new mapboxgl.NavigationControl());
-  
+
+    map.addControl(new maplibregl.NavigationControl());
+
     let points = [];
     let polygonLayerId = null;
     let watchId = null;
     let lastCoords = null;
-    const MIN_DISTANCE = 1; // in meters
-  
+    const MIN_DISTANCE = 2;
+
     function updatePolygon() {
       if (polygonLayerId && map.getLayer(polygonLayerId)) {
         map.removeLayer(polygonLayerId);
         map.removeSource(polygonLayerId);
       }
-  
+
       if (points.length < 3) return;
-  
+
       const polygon = {
         type: 'Feature',
         geometry: {
           type: 'Polygon',
-          coordinates: [[...points, points[0]]],
-        },
+          coordinates: [[...points, points[0]]]
+        }
       };
-  
+
       polygonLayerId = 'polygon-' + Date.now();
-  
+
       map.addSource(polygonLayerId, {
         type: 'geojson',
-        data: polygon,
+        data: polygon
       });
-  
+
       map.addLayer({
         id: polygonLayerId,
         type: 'fill',
@@ -173,53 +194,57 @@
         layout: {},
         paint: {
           'fill-color': '#088',
-          'fill-opacity': 0.4,
-        },
+          'fill-opacity': 0.4
+        }
       });
-  
+
       const areaSqMeters = turf.area(polygon);
-      const perimeterMeters = turf.length(polygon, { units: 'meters' }) * 1000;
+      const perimeterMeters = turf.length(polygon, { units: 'kilometers' }) * 1000;
       const areaAcres = areaSqMeters / 4046.86;
-  
+
       document.getElementById('area').textContent = `Area: ${areaAcres.toFixed(2)} acres`;
       document.getElementById('perimeter').textContent = `Perimeter: ${perimeterMeters.toFixed(2)} meters`;
 
-      
-      
+      // If React Native WebView is listening
+      if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'MEASUREMENT_UPDATE',
+          area: areaAcres.toFixed(2),
+          perimeter: perimeterMeters.toFixed(2)
+        }));
+      }
     }
-  
+
     function startMeasurement() {
       points = [];
       lastCoords = null;
-  
+
       alert("Start walking. GPS points will be tracked every 5+ meters.");
-  
+
       if (!navigator.geolocation) {
         alert("Geolocation not supported.");
         return;
       }
-  
+
       watchId = navigator.geolocation.watchPosition(
         (pos) => {
           const { latitude, longitude } = pos.coords;
           const current = [longitude, latitude];
-  
+
           if (!lastCoords) {
             lastCoords = current;
             points.push(current);
             updatePolygon();
             return;
           }
-  
+
           const dist = turf.distance(turf.point(lastCoords), turf.point(current), { units: "meters" });
           if (dist >= MIN_DISTANCE) {
             points.push(current);
             lastCoords = current;
             updatePolygon();
-  
-            new mapboxgl.Marker({ color: "green" })
-              .setLngLat(current)
-              .addTo(map);
+
+            new maplibregl.Marker({ color: "green" }).setLngLat(current).addTo(map);
           }
         },
         (err) => alert("Location error: " + err.message),
@@ -230,7 +255,7 @@
         }
       );
     }
-  
+
     function stopMeasurement() {
       if (watchId != null) {
         navigator.geolocation.clearWatch(watchId);
@@ -238,13 +263,13 @@
       }
       alert("Measurement stopped.");
     }
-  
+
     function findLocation() {
       if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition((pos) => {
           const { latitude, longitude } = pos.coords;
           map.flyTo({ center: [longitude, latitude], zoom: 17 });
-          new mapboxgl.Marker({ color: "blue" }).setLngLat([longitude, latitude]).addTo(map);
+          new maplibregl.Marker({ color: "blue" }).setLngLat([longitude, latitude]).addTo(map);
         }, () => {
           alert("Unable to retrieve location.");
         });
@@ -253,7 +278,5 @@
       }
     }
   </script>
-  
-  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
 </body>
 </html>
